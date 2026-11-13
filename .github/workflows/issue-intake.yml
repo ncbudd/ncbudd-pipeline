@@ -1,0 +1,39 @@
+name: Issue intake
+
+# Reusable: acknowledge a new issue with a fixed comment and make sure it carries status:triage.
+# No AI and no issue text is ever interpolated into script source: the script reads the event payload only.
+# Security-labelled issues get no public comment.
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  intake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Acknowledge and label
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const issue = context.payload.issue;
+            if (!issue || issue.user.type === 'Bot') return;
+            const { owner, repo } = context.repo;
+            const number = issue.number;
+            const names = issue.labels.map((l) => (typeof l === 'string' ? l : l.name));
+            if (!names.includes('status:triage')) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: ['status:triage'] });
+            }
+            if (names.includes('security')) return; // never discussed in public
+            const body = names.includes('feature')
+              ? "Thanks for the idea. It's been noted for review."
+              : 'Thanks for the report. This is being looked at; updates will be posted here.';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: number, per_page: 100,
+            });
+            if (comments.some((c) => c.user.login === 'github-actions[bot]' && c.body.trim() === body)) return;
+            await github.rest.issues.createComment({ owner, repo, issue_number: number, body });
