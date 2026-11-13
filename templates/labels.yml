@@ -1,0 +1,32 @@
+# Label set for the issue/PR state machine. Describes the labels only; apply with a label-sync tool or
+# `gh label create` (nothing applies this file automatically).
+- name: status:triage
+  color: "fbca04"
+  description: New, not yet looked at
+- name: status:needs-info
+  color: "d4c5f9"
+  description: Waiting for more information from the reporter
+- name: status:fixing
+  color: "1d76db"
+  description: A fix is being worked on
+- name: status:awaiting-approval
+  color: "e99695"
+  description: Fix or change is ready and waiting for the maintainer to approve
+- name: status:approved
+  color: "0e8a16"
+  description: Approved by the maintainer (applied to feature requests)
+- name: status:released
+  color: "5319e7"
+  description: Shipped in a release
+- name: bug
+  color: "d73a4a"
+  description: Something is broken
+- name: feature
+  color: "a2eeef"
+  description: New capability or improvement
+- name: security
+  color: "b60205"
+  description: Security related
+- name: agent:working
+  color: "bfdadc"
+  description: An automated agent is working on this right now

@@ -1,0 +1,65 @@
+name: CI (Android)
+
+# Reusable: Gradle tests, lint and debug build for an Android project. Optional Node step first, for
+# Capacitor-style apps whose web build has to be synced into the Android project.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: The Android project directory (where gradlew lives).
+        type: string
+        default: android
+      gradle-tasks:
+        type: string
+        default: testDebugUnitTest lintDebug assembleDebug
+      java-version:
+        type: string
+        default: "21"
+      prepare-command:
+        description: Optional shell commands to run from the repository root before Gradle (for example a web build and cap sync).
+        type: string
+        default: ""
+      node-version:
+        description: If set, Node is installed before the prepare command.
+        type: string
+        default: ""
+      node-lockfile:
+        description: Lockfile path used as the npm cache key (only with node-version).
+        type: string
+        default: package-lock.json
+
+permissions: {}
+
+jobs:
+  gradle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: inputs.node-version != ''
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.node-lockfile }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+      - name: Prepare
+        if: inputs.prepare-command != ''
+        env:
+          PREPARE: ${{ inputs.prepare-command }}
+        run: bash -ec "$PREPARE"
+      - name: Gradle
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          TASKS: ${{ inputs.gradle-tasks }}
+        run: |
+          # shellcheck disable=SC2086
+          ./gradlew $TASKS --no-daemon --stacktrace

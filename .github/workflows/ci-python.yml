@@ -1,0 +1,76 @@
+name: CI (Python)
+
+# Reusable: install a Python project and run pytest, optionally split into shards that run in parallel.
+# Sharding needs no extra dependency: test files are sorted by size and dealt out round-robin, so each
+# shard gets a similar mix of big and small files. Pass `shards: '[0,1,2,3]'` for four parallel shards.
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        type: string
+        default: "3.12"
+      working-directory:
+        description: Directory holding pyproject.toml (the tests run from here).
+        type: string
+        default: "."
+      install-command:
+        type: string
+        default: uv pip install --system -e ".[dev]"
+      test-dir:
+        description: Directory (relative to working-directory) that holds the test files.
+        type: string
+        default: tests
+      pytest-args:
+        type: string
+        default: -q -p no:cacheprovider --durations=15
+      shards:
+        description: JSON list with one entry per shard, for example [0,1,2,3]. [0] means no sharding.
+        type: string
+        default: "[0]"
+
+permissions: {}
+
+jobs:
+  pytest:
+    name: pytest (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(inputs.shards) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Install
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: bash -ec "$INSTALL_COMMAND"
+      - name: Test
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          TEST_DIR: ${{ inputs.test-dir }}
+          PYTEST_ARGS: ${{ inputs.pytest-args }}
+          SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ strategy.job-total }}
+        run: |
+          set -e
+          if [ "$SHARD_COUNT" -le 1 ]; then
+            # shellcheck disable=SC2086
+            python -m pytest $PYTEST_ARGS
+            exit 0
+          fi
+          files=$(find "$TEST_DIR" -name 'test_*.py' -printf '%s %p\n' | sort -rn | awk -v n="$SHARD_COUNT" -v i="$SHARD" 'NR % n == i { print $2 }')
+          if [ -z "$files" ]; then echo "No test files for shard $SHARD."; exit 0; fi
+          echo "Shard $SHARD runs $(echo "$files" | wc -l) files"
+          # shellcheck disable=SC2086
+          python -m pytest $PYTEST_ARGS $files

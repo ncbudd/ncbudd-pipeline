@@ -1,0 +1,124 @@
+name: Security
+
+# Reusable: Semgrep CE, Trivy filesystem scan, gitleaks, the personal-identity leak denylist, and (on pull
+# requests) dependency review. Safe for forks: nothing here needs a secret, and the denylist step simply
+# skips when the secret is not available (fork PRs).
+#
+# The denylist is a repository secret named LEAK_DENYLIST: one fixed string per line (names, addresses, IPs,
+# anything that must never appear in a public repo). Callers pass it explicitly (`secrets: LEAK_DENYLIST: ${{ secrets.LEAK_DENYLIST }}`). Matches are
+# reported as file:line only, never the text, so the public log does not repeat what it is guarding.
+
+on:
+  workflow_call:
+    inputs:
+      semgrep-config:
+        type: string
+        default: p/default
+      trivy-severity:
+        type: string
+        default: HIGH,CRITICAL
+    secrets:
+      LEAK_DENYLIST:
+        required: false
+
+permissions: {}
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Semgrep CE
+        env:
+          SEMGREP_CONFIG: ${{ inputs.semgrep-config }}
+        run: |
+          pip install --disable-pip-version-check semgrep==1.182.1
+          semgrep scan --config "$SEMGREP_CONFIG" --error --metrics=off --quiet .
+
+  trivy-fs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig
+          severity: ${{ inputs.trivy-severity }}
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-dirs: node_modules
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  leak-denylist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan tracked files for denylisted strings
+        env:
+          LEAK_DENYLIST: ${{ secrets.LEAK_DENYLIST }}
+        run: |
+          set -e
+          if [ -z "$LEAK_DENYLIST" ]; then
+            echo "LEAK_DENYLIST is not available (fork pull request, or not set). Skipping."
+            exit 0
+          fi
+          list="$RUNNER_TEMP/denylist.txt"
+          hits="$RUNNER_TEMP/hits.txt"
+          printf '%s\n' "$LEAK_DENYLIST" | sed '/^[[:space:]]*$/d' > "$list"
+          while IFS= read -r line; do echo "::add-mask::$line"; done < "$list"
+          # -F fixed strings, -i ignore case, -I skip binaries, -n line numbers; keep only file:line in the log.
+          if git grep -F -i -I -n -f "$list" -- . > "$hits"; then
+            echo "::error::Denylisted strings found at:"
+            cut -d: -f1,2 "$hits"
+            rm -f "$list" "$hits"
+            exit 1
+          fi
+          rm -f "$list" "$hits"
+          echo "No denylisted strings found."
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high

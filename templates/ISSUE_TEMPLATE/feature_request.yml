@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an improvement or a new capability.
+labels: ["feature", "status:triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are reviewed by the maintainer. Work starts once a request is marked approved.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: How it could work. Rough is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+    validations:
+      required: false

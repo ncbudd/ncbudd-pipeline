@@ -1,0 +1,40 @@
+name: Bug report
+description: Something is broken or behaves differently from what you expected.
+labels: ["bug", "status:triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do not paste passwords, tokens, addresses or other personal details.
+        For security problems use the private "Report a vulnerability" link on the Security tab instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: App or server version (Settings, About), or the image tag.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Remove anything personal first.
+      render: shell
+    validations:
+      required: false
