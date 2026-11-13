@@ -1,0 +1,84 @@
+name: Release notify
+
+# Reusable: after a release is published, comment on the issues fixed by it (fixed comment 4) and label them
+# status:released. Issues are found from the merged PRs between the previous release tag and this one, using the
+# PRs' closing references. Security-labelled issues get the label only, never a public comment.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag (for example v1.2.3).
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      pull-requests: read
+      contents: read
+    steps:
+      - name: Comment on fixed issues
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          TAG: ${{ inputs.tag }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = process.env.TAG;
+            const release = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+            const releases = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 });
+            const published = releases
+              .filter((r) => !r.draft && !r.prerelease && r.tag_name !== tag
+                && new Date(r.published_at) < new Date(release.data.published_at))
+              .sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
+            if (!published.length) { core.info('First release, nothing to notify.'); return; }
+            const prev = published[0].tag_name;
+            const cmp = await github.paginate(github.rest.repos.compareCommitsWithBasehead, {
+              owner, repo, basehead: `${prev}...${tag}`, per_page: 100,
+            });
+            const shas = [...new Set(cmp.flatMap((page) => (page.commits || []).map((x) => x.sha)))];
+            const prNumbers = new Set();
+            for (const sha of shas) {
+              const prs = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+                owner, repo, commit_sha: sha, per_page: 100,
+              });
+              for (const pr of prs) if (pr.merged_at) prNumbers.add(pr.number);
+            }
+            const issueNumbers = new Set();
+            for (const n of prNumbers) {
+              const res = await github.graphql(
+                `query($owner: String!, $repo: String!, $n: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $n) { closingIssuesReferences(first: 50) { nodes { number } } }
+                  }
+                }`, { owner, repo, n });
+              for (const i of res.repository.pullRequest.closingIssuesReferences.nodes) issueNumbers.add(i.number);
+            }
+            const version = tag.replace(/^v/, '');
+            const body = `Fixed in v${version} (${release.data.html_url}). Please reopen if it still happens.`;
+            const remove = ['status:awaiting-approval', 'status:fixing', 'agent:working'];
+            for (const number of issueNumbers) {
+              const issue = (await github.rest.issues.get({ owner, repo, issue_number: number })).data;
+              if (issue.pull_request) continue;
+              const names = issue.labels.map((l) => (typeof l === 'string' ? l : l.name));
+              if (!names.includes('security')) {
+                const comments = await github.paginate(github.rest.issues.listComments, {
+                  owner, repo, issue_number: number, per_page: 100,
+                });
+                if (!comments.some((c) => c.user.login === 'github-actions[bot]' && c.body.trim() === body)) {
+                  await github.rest.issues.createComment({ owner, repo, issue_number: number, body });
+                }
+              }
+              for (const name of remove.filter((x) => names.includes(x))) {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name });
+              }
+              if (!names.includes('status:released')) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: ['status:released'] });
+              }
+            }
