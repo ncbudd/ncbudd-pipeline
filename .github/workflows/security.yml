@@ -1,7 +1,7 @@
 name: Security
 
 # Reusable: Semgrep CE, Trivy filesystem scan, gitleaks, the personal-identity leak denylist, and (on pull
-# requests) dependency review. Safe for forks: nothing here needs a secret, and the denylist step simply
+# requests, public repos only) dependency review. Safe for forks: nothing here needs a secret, and the denylist step simply
 # skips when the secret is not available (fork PRs).
 #
 # The denylist is a repository secret named LEAK_DENYLIST: one fixed string per line (names, addresses, IPs,
@@ -109,8 +109,10 @@ jobs:
           rm -f "$list" "$hits"
           echo "No denylisted strings found."
 
+  # Needs the dependency graph plus GitHub Advanced Security, which private repos on a free plan do not have:
+  # run it for public repos only (it fails with "not supported on this repository" otherwise).
   dependency-review:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.repository.private == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

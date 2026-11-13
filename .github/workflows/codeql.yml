@@ -1,6 +1,8 @@
 name: CodeQL
 
 # Reusable: CodeQL code scanning. `languages` is a JSON list, for example ["python","javascript-typescript"].
+# On private repos without GitHub Advanced Security, code scanning is unavailable, so the SARIF is not uploaded
+# there: analysis still runs and the results are kept as a workflow artifact instead.
 # build-mode `none` works for Python, JavaScript/TypeScript, Java/Kotlin and others without a build.
 
 on:
@@ -39,3 +41,12 @@ jobs:
       - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: /language:${{ matrix.language }}
+          upload: ${{ github.event.repository.private && 'never' || 'always' }}
+          output: codeql-results
+      - name: Keep results as an artifact (private repos)
+        if: ${{ !cancelled() && github.event.repository.private }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-sarif-${{ matrix.language }}
+          path: codeql-results
+          retention-days: 14

@@ -10,6 +10,8 @@ permissions: {}
 
 jobs:
   scorecard:
+    # Scorecard needs a public repo (it reads repo settings through the public API and uploads to code scanning).
+    if: github.event.repository.private == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
