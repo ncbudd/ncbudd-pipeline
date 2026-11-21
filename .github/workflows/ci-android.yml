@@ -51,6 +51,12 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
+          # Gradle's downloaded libraries and wrapper, keyed on the build files: most runs then download almost nothing, which
+          # keeps us under Maven Central's rate limit (429 Too Many Requests). Pull requests read the default branch's cache.
+          cache: gradle
+          cache-dependency-path: |
+            ${{ inputs.working-directory }}/**/*.gradle*
+            ${{ inputs.working-directory }}/**/gradle-wrapper.properties
       - name: Prepare
         if: inputs.prepare-command != ''
         env:
@@ -61,5 +67,20 @@ jobs:
         env:
           TASKS: ${{ inputs.gradle-tasks }}
         run: |
-          # shellcheck disable=SC2086
-          ./gradlew $TASKS --no-daemon --stacktrace
+          set -o pipefail
+          log="$RUNNER_TEMP/gradle.log"
+          # Maven Central sometimes refuses or loses downloads (429 Too Many Requests, 5xx, timeouts, a library briefly
+          # "not found"). Gradle retries each download itself (more patiently with the settings below); if the build still
+          # fails on downloads, run it again after a pause. A failure that isn't about downloads (a test, a compile error)
+          # fails at once.
+          for attempt in 1 2 3; do
+            # shellcheck disable=SC2086
+            if ./gradlew $TASKS --no-daemon --stacktrace                 -Dorg.gradle.internal.repository.max.retries=5                 -Dorg.gradle.internal.repository.initial.backoff=2000 2>&1 | tee "$log"; then
+              exit 0
+            fi
+            if [ "$attempt" = 3 ] || ! grep -qE "Received status code (429|5[0-9][0-9])|Could not (GET|HEAD) '|Could not (resolve|find) [a-z0-9._-]+:[a-zA-Z0-9._-]+:|(Read|Connect|connect) timed out|Connection reset|Remote host terminated" "$log"; then
+              exit 1
+            fi
+            echo "::warning::Downloading Gradle libraries failed (attempt $attempt of 3), trying again in $((attempt * 60)) s."
+            sleep $((attempt * 60))
+          done
